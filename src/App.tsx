@@ -25,7 +25,64 @@ const fmt=(v:number,d=2)=>Number.isFinite(v)?v.toLocaleString(undefined,{maximum
 function annualize(rows:{year:number;month:number;value:number}[]):Year[]{const m=new Map<number,number[]>();rows.forEach(r=>{if(Number.isFinite(r.value)&&r.value>-900){const a=m.get(r.year)||[];a.push(r.value);m.set(r.year,a)}});return [...m.entries()].filter(([,a])=>a.length>=10).map(([year,a])=>({year,value:a.reduce((s,v)=>s+v,0)/a.length})).sort((a,b)=>a.year-b.year)}
 function pNormal(t:number){const z=Math.abs(t),x=1/(1+.2316419*z),d=.3989423*Math.exp(-z*z/2),tail=d*x*(.3193815+x*(-.3565638+x*(1.781478+x*(-1.821256+x*1.330274))));return Math.max(0,Math.min(1,2*tail))}
 function calculate(a:Year[]):Stat|null{if(a.length<5)return null;const x=a.map(v=>v.year),y=a.map(v=>v.value),mx=x.reduce((s,v)=>s+v,0)/x.length,my=y.reduce((s,v)=>s+v,0)/y.length,sxx=x.reduce((s,v)=>s+(v-mx)**2,0),sxy=x.reduce((s,v,i)=>s+(v-mx)*(y[i]-my),0),slope=sxy/sxx,intercept=my-slope*mx,pred=x.map(v=>intercept+slope*v),sse=y.reduce((s,v,i)=>s+(v-pred[i])**2,0),sst=y.reduce((s,v)=>s+(v-my)**2,0),se=Math.sqrt((sse/Math.max(1,x.length-2))/sxx),p=se===0?(slope===0?1:0):pNormal(slope/se);return{slope,intercept,r2:sst?Math.max(0,1-sse/sst):0,p,low:slope-1.96*se,high:slope+1.96*se,direction:slope>.00001?'Increasing':slope<-.00001?'Decreasing':'Relatively stable'}}
-async function getData(place:Place,v:VKey,start:number,end:number):Promise<Year[]>{const q=new URLSearchParams({parameters:v,community:'RE',longitude:String(place.lon),latitude:String(place.lat),start:String(start),end:String(end),format:'JSON'});const res=await fetch(`https://power.larc.nasa.gov/api/temporal/monthly/point?${q}`);if(!res.ok){let detail='';try{const err=await res.json();detail=[...(Array.isArray(err?.messages)?err.messages:[]),...(Array.isArray(err?.parameter?.messages)?err.parameter.messages:[]),err?.message].filter(Boolean).join(' ')}catch{}throw new Error(`NASA POWER request failed (${res.status})${detail?`: ${detail}`:' — the API rejected this request. Check the selected variable, year range, and network connection.'}`)}const j=await res.json(),data=j?.properties?.parameter?.[v];if(!data)throw new Error('No data returned for this variable and date range.');return annualize(Object.entries(data).map(([k,val])=>({year:+k.slice(0,4),month:+k.slice(4),value:+val})))}
+async function getData(
+  place: Place,
+  v: VKey,
+  start: number,
+  end: number
+): Promise<Year[]> {
+  const q = new URLSearchParams({
+    parameters: v,
+    community: 'RE',
+    longitude: String(place.lon),
+    latitude: String(place.lat),
+    start: String(start),
+    end: String(end),
+    format: 'JSON'
+  });
+
+  const res = await fetch(
+    `https://power.larc.nasa.gov/api/temporal/monthly/point?${q}`
+  );
+
+  if (!res.ok) {
+    let detail = '';
+
+    try {
+      const err = await res.json();
+      detail = [
+        ...(Array.isArray(err?.messages) ? err.messages : []),
+        ...(Array.isArray(err?.parameter?.messages)
+          ? err.parameter.messages
+          : []),
+        err?.message
+      ].filter(Boolean).join(' ');
+    } catch {}
+
+    throw new Error(
+      `NASA POWER request failed (${res.status})${
+        detail
+          ? `: ${detail}`
+          : ' — the API rejected this request. Check the selected variable, year range, and network connection.'
+      }`
+    );
+  }
+
+  const j = await res.json();
+  const data = j?.properties?.parameter?.[v];
+
+  if (!data) {
+    throw new Error('No data returned for this variable and date range.');
+  }
+
+  return annualize(
+    Object.entries(data as Record<string, number>).map(([k, val]) => ({
+      year: Number(k.slice(0, 4)),
+      month: Number(k.slice(4)),
+      value: Number(val)
+    }))
+  );
+}
 
 function median(values:number[]){if(!values.length)return 0;const a=[...values].sort((x,y)=>x-y),m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2}
 function theilSen(a:Year[]){const slopes:number[]=[];for(let i=0;i<a.length;i++)for(let j=i+1;j<a.length;j++)if(a[j].year!==a[i].year)slopes.push((a[j].value-a[i].value)/(a[j].year-a[i].year));return median(slopes)}
@@ -44,7 +101,8 @@ useEffect(()=>{if(!mapPlay)return;const timer=window.setInterval(()=>setMapYear(
 
  function go(id:string){setSection(id);setMenu(false);document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'})}
  function exportCsv(){const blob=new Blob([[`year,${v.name} (${v.unit})`,...data.map(d=>`${d.year},${d.value}`)].join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`terratrend-${variable}-${place.name.replace(/[^a-z0-9]+/gi,'-').toLowerCase()}.csv`;a.click();URL.revokeObjectURL(url)}
- const latest=data.at(-1),first=data[0],change=latest&&first?latest.value-first.value:0;
+const latest = data[data.length - 1], first = data[0],
+  change = latest && first ? latest.value - first.value : 0;
  return <div className="site">
   <header className="nav"><a className="logo" href="#home" onClick={e=>{e.preventDefault();go('home')}}><span className="logo-icon"><Orbit size={21}/></span><span>TERRA<span className="cyan">TREND</span><small>EARTH · CLIMATE · CHANGE</small></span></a>
    <nav className={menu?'nav-links open':'nav-links'}><button className={section==='home'?'selected':''} onClick={()=>go('home')}>Discover</button><button onClick={()=>go('explore')}>Explore data</button><button onClick={()=>go('compare')}>Opposite trends</button><button onClick={()=>go('map')}>Trend atlas</button><button onClick={()=>go('insights')}>Insights</button><button onClick={()=>go('method')}>Methodology</button></nav>
